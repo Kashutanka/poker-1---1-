@@ -109,7 +109,6 @@
       user-select: none;
     }
 
-    /* NEW: Стили для текущего игрока */
     .current-player-cell {
       position: relative;
     }
@@ -135,11 +134,11 @@
 <body>
   <h1>Dice Poker</h1>
   <label>Количество игроков:
-    <input type="number" id="numPlayers" min="1" max="16" value="2" style="width:50px;">
+    <input type="number" id="numPlayers" min="2" max="16" value="2" style="width:50px;">
   </label>
   <button onclick="startGame()">Начать игру</button>
 
-  <div>Раунд: <span id="currentRound">1</span>/15</div>
+  <div>Раунд: <span id="currentRound">1</span>/14</div>
   <div id="currentPlayer" style="margin-top: 20px; font-size: 1.2rem; font-weight: bold;"></div>
   <div id="diceContainer"></div>
   <button id="rollBtn" onclick="rollDice()">Бросить кости</button>
@@ -177,9 +176,10 @@
     let diceSelected = Array(diceCount).fill(false);
     let players = [];
     let currentRound = 1;
-    const totalRounds = 15;
+    const totalRounds = 14;
+    let gameStarted = false;
+    let isFinalRoundActive = false;
 
-    // Исправленная функция startGame()
     function startGame() {
       numPlayers = Math.max(1, Math.min(16, parseInt(document.getElementById('numPlayers').value) || 2));
       players = Array(numPlayers).fill().map((_, i) => ({
@@ -192,48 +192,61 @@
       resetDice();
       gameStarted = true;
       updateGameUI();
+      isFinalRound = false;
+      roundCompletedPlayers = 0;
       showInfo(`Игра началась! ${players[currentPlayer].name}, бросайте кости!`);
     }
 
-    // Переключение хода
-   function nextPlayerTurn() {
-      // Проверяем завершение игры
-      if (currentRound > totalRounds) {
+    function nextPlayerTurn() {
+      // Проверяем завершение финального раунда
+      if (isFinalRound && roundCompletedPlayers >= numPlayers) {
         showFinalResults();
         return;
       }
 
-      // Находим следующего игрока, у которого есть незаполненные категории
-      let nextPlayer = (currentPlayer + 1) % numPlayers;
-      let attempts = 0;
-      
-      while (attempts < numPlayers) {
-        if (!players[nextPlayer].completed) break;
-        nextPlayer = (nextPlayer + 1) % numPlayers;
-        attempts++;
-      }
+      // Проверяем начало финального раунда
+     
 
-      // Если все игроки завершили - заканчиваем игру
-      if (attempts >= numPlayers) {
-        showFinalResults();
-        return;
-      }
+      // Сбрасываем кубики
+      diceValues = Array(diceCount).fill(1);
+      diceSelected = Array(diceCount).fill(false);
+      rollsLeft = (currentRound === 14) ? 4 : 3;
 
-      currentPlayer = nextPlayer;
-      
-      // Если это первый игрок в новом раунде - увеличиваем раунд
-      if (currentPlayer === 0) {
+      // Переход к следующему игроку
+      currentPlayer = (currentPlayer + 1) % numPlayers;
+
+      // Если завершили круг игроков
+      if (currentPlayer === 0 && !isFinalRound) {
         currentRound++;
+        document.getElementById('currentRound').textContent = currentRound;
+         if (currentRound  === totalRounds && !isFinalRound) {
+        isFinalRound = true;
+        roundCompletedPlayers = 0;
+        rollsLeft++;
+        showInfo("Финальный раунд! У всех по 4 броска.");
+      }
       }
 
-      // Сбрасываем кубики и устанавливаем количество бросков
-      resetDice();
+      // Если игрок завершил все категории в финальном раунде
+      if (isFinalRound && !hasAvailableCategories(currentPlayer)) {
+        roundCompletedPlayers++;
+      }
+
       updateGameUI();
-      showInfo(`Ходит ${players[currentPlayer].name}! Бросьте кости.`);
+      showInfo(`Раунд ${currentRound}/${totalRounds}. Ход: ${players[currentPlayer].name}`);
     }
 
-    // Выбор категории для записи очков
+    function hasAvailableCategories(playerIndex) {
+      return ROWS.slice(0, 15)
+        .filter(r => r.editable)
+        .some((_, i) => players[playerIndex].scores[i] === null);
+    }
+
     function onCategoryClick(row, playerIndex) {
+      if (isFinalRound && !hasAvailableCategories(currentPlayer)) {
+        roundCompletedPlayers++;
+      }
+
       if (playerIndex !== currentPlayer) {
         showInfo(`Сейчас ход ${players[currentPlayer].name}!`);
         return;
@@ -244,51 +257,93 @@
         return;
       }
 
+      if (row === 15) {
+        const allFilled = ROWS.slice(0, 15)
+          .filter(r => r.editable)
+          .every((_, i) => players[playerIndex].scores[i] !== null);
+
+        if (!allFilled) {
+          showInfo("Сначала заполните все остальные категории!");
+          return;
+        }
+
+        players[playerIndex].scores[15] = getTotalForCategoryGroup(playerIndex, 'grandTotal');
+        players[playerIndex].completed = true;
+        updateGameUI();
+
+        if (players.every(p => p.completed)) {
+          showInfo("Игра окончена!");
+          showFinalRanking(); // <- Добавить сюда
+          document.getElementById("rollButton").disabled = true;
+          return;
+        }
+
+      }
+
       const score = calculateScoreForCategory(row, diceValues);
       if (score === null) {
         showInfo("Нельзя записать в эту категорию!");
         return;
       }
 
-      // Записываем очки
       players[playerIndex].scores[row] = score;
-      
-      // Проверяем, заполнил ли игрок все категории
-      const allFilled = ROWS.filter(r => r.editable)
-        .every((_, i) => players[playerIndex].scores[i] !== null);
-      
-      if (allFilled) {
-        players[playerIndex].completed = true;
-        showInfo(`${players[playerIndex].name} завершил все категории!`);
-      }
+      updateGameUI();
 
-      // Переключаем ход
+      const remainingCategories = ROWS.slice(0, 15)
+        .filter(r => r.editable)
+        .filter((_, i) => players[playerIndex].scores[i] === null).length;
+
       nextPlayerTurn();
+
+    }
+
+    function showFinalRanking() {
+      const results = players.map((player, index) => ({
+        name: player.name || `Игрок ${index + 1}`,
+        score: player.scores[15] || 0
+      }));
+
+      results.sort((a, b) => b.score - a.score);
+
+      const rankingHTML = results.map((p, i) =>
+        `<tr><td>${i + 1}</td><td>${p.name}</td><td>${p.score}</td></tr>`
+      ).join("");
+
+      const modal = document.createElement("div");
+      modal.id = "rankingModal";
+      modal.style.position = "fixed";
+      modal.style.top = 0;
+      modal.style.left = 0;
+      modal.style.width = "100%";
+      modal.style.height = "100%";
+      modal.style.backgroundColor = "rgba(0,0,0,0.6)";
+      modal.style.display = "flex";
+      modal.style.justifyContent = "center";
+      modal.style.alignItems = "center";
+      modal.innerHTML = `
+    <div style="background:#fff;padding:20px;border-radius:10px;max-width:400px;width:90%">
+      <h2>🏆 Итоговый рейтинг</h2>
+      <table style="width:100%;text-align:left;margin-top:10px">
+        <thead><tr><th>#</th><th>Игрок</th><th>Очки</th></tr></thead>
+        <tbody>${rankingHTML}</tbody>
+      </table>
+      <button onclick="document.getElementById('rankingModal').remove()" style="margin-top:15px">Закрыть</button>
+    </div>
+  `;
+      document.body.appendChild(modal);
     }
 
     function resetDice() {
       diceValues = Array(diceCount).fill(1);
       diceSelected = Array(diceCount).fill(false);
-      rollsLeft = (currentRound === totalRounds) ? 4 : 3;
+      rollsLeft = (currentRound === 14) ? 4 : 3;
       renderDice();
       updateRollsLeft();
     }
 
     function getTotalForCategoryGroup(playerIndex, group) {
-      if (!players[playerIndex]) return '';
       const player = players[playerIndex];
-
-      const ranges = {
-        'schoolTotal': [0, 1, 2, 3, 4, 5],
-        'grandTotal': Array.from({ length: ROWS.length }, (_, i) => i)
-      };
-
-      const range = ranges[group];
-      if (!range) return '';
-
-      // Проверяем заполненность всех категорий группы
-      const allFilled = range.every(i => player.scores[i] !== null);
-      if (!allFilled) return '';
+      if (!player) return 0;
 
       if (group === 'schoolTotal') {
         let sum = 0;
@@ -301,24 +356,25 @@
             else if (score.startsWith('-')) sum -= parseInt(score.slice(1));
           }
         }
-        player.scores[6] = sum * 10;
-        return sum * 10;
+        player.scores[6] = sum;
+        return sum;
       }
 
       if (group === 'grandTotal') {
-        let school = player.scores[6] || 0;
+        const school = getTotalForCategoryGroup(playerIndex, 'schoolTotal');
         let other = 0;
         for (let i = 7; i <= 14; i++) {
-          if (player.scores[i] !== null) other += player.scores[i];
+          if (player.scores[i] !== null) {
+            other += typeof player.scores[i] === 'number' ? player.scores[i] : 0;
+          }
         }
         player.scores[15] = school + other;
         return school + other;
       }
 
-      return '';
+      return 0;
     }
 
-    // Добавьте эту вспомогательную функцию:
     function updateGameUI() {
       document.getElementById('currentRound').textContent = currentRound;
       generateTable();
@@ -327,30 +383,25 @@
       updateCurrentPlayerDisplay();
     }
 
-    // Отобразить текущего игрока
     function updateCurrentPlayerDisplay() {
       document.getElementById('currentPlayer').innerHTML =
         `Ход: <span class="current-player-name">${players[currentPlayer].name}</span>`;
     }
 
-    // Обновить счётчик бросков и кнопку
     function updateRollsLeft() {
       document.getElementById('rollsLeft').textContent = rollsLeft;
       document.getElementById('rollBtn').disabled = (rollsLeft === 0);
     }
 
-    // Создать таблицу очков
     function generateTable() {
       const container = document.getElementById('gameContainer');
       container.innerHTML = '';
 
       const table = document.createElement('table');
 
-      // Шапка таблицы
       const headerRow = document.createElement('tr');
       headerRow.innerHTML = '<td bgcolor="#f0f0f0">Категория</td>';
 
-      // Заголовки игроков
       players.forEach((player, p) => {
         const th = document.createElement('th');
         if (p === currentPlayer) th.classList.add('current-player-cell');
@@ -366,7 +417,6 @@
       });
       table.appendChild(headerRow);
 
-      // Строки категорий
       ROWS.forEach((row, r) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td bgcolor="${row.color}">${row.label}</td>`;
@@ -385,26 +435,11 @@
             input.readOnly = true;
             input.id = `cell_${r}_${p}`;
 
-            // Для школы (1-6)
             if (r <= 5) {
               if (player.scores[r] !== null) {
                 input.value = formatScore(player.scores[r]);
-              } else if (rollsLeft < 3) {
-                const value = r + 1;
-                const count = diceValues.filter(d => d === value).length;
-
-                if (count > 0) {
-                  if (count === 3) input.value = "—";
-                  else if (count === 2) input.value = `-${value * 10}`;
-                  else if (count === 1) input.value = `-${value * 20}`;
-                  else if (count >= 4) {
-                    input.value = count === 5 ? `+${value * 20}` : `+${value * 10}`;
-                  }
-                }
               }
-            }
-            // Для других категорий
-            else if (player.scores[r] !== null) {
+            } else if (player.scores[r] !== null) {
               input.value = formatScore(player.scores[r]);
             }
 
@@ -422,7 +457,7 @@
 
       container.appendChild(table);
     }
-    // NEW: Форматирование очков для отображения
+
     function formatScore(score) {
       if (score === null) return '';
       if (score === "—") return score;
@@ -431,29 +466,22 @@
       return score.toString();
     }
 
-    // Обновить имя игрока
     function updatePlayerName(p) {
       const input = document.getElementById(`playerName_${p}`);
       if (!input || !players[p]) return;
 
       let newName = input.value.trim();
-
-      // Если имя пустое, оставляем значение по умолчанию
       if (!newName) {
         newName = `Игрок ${p + 1}`;
-      }
-      // Ограничиваем длину имени
-      else if (newName.length > 15) {
+      } else if (newName.length > 15) {
         newName = newName.slice(0, 15);
       }
 
-      // Обновляем значение в players
       players[p].name = newName;
       input.value = newName;
       updateCurrentPlayerDisplay();
     }
 
-    // Отобразить кости
     function renderDice() {
       const container = document.getElementById('diceContainer');
       container.innerHTML = '';
@@ -483,22 +511,30 @@
     }
 
     function showFinalResults() {
-      let result = "Итоговые очки:\n";
+      let result = "<h2>Игра завершена!</h2><p>Итоговые очки:</p><ul>";
       players.forEach(player => {
-        const total = player.scores[15] || 0; // Общий итог из 16-й ячейки
-        result += `${player.name}: ${total}\n`;
+        const total = player.scores[15] || 0;
+        result += `<li>${player.name}: ${total}</li>`;
       });
-      showInfo(result);
+      result += "</ul>";
+
+      const winner = players.reduce((prev, current) =>
+        (prev.scores[15] > current.scores[15]) ? prev : current
+      );
+      result += `<h3>Победитель: ${winner.name} с ${winner.scores[15]} очками!</h3>`;
+
+      document.getElementById('gameContainer').innerHTML = result;
+      document.getElementById('diceContainer').innerHTML = '';
+      document.getElementById('rollBtn').style.display = 'none';
+      document.getElementById('info').innerHTML = '';
     }
 
-    // Бросить кости
     function rollDice() {
       if (rollsLeft <= 0) {
         showInfo("Выберите категорию для записи очков!");
         return;
       }
 
-      // Бросаем только невыбранные кубики
       for (let i = 0; i < diceCount; i++) {
         if (!diceSelected[i]) {
           diceValues[i] = Math.floor(Math.random() * 6) + 1;
@@ -508,14 +544,13 @@
       rollsLeft--;
       updateRollsLeft();
       renderDice();
-      highlightCategories(); // Подсказки после каждого броска
+      highlightCategories();
 
       showInfo(rollsLeft > 0
         ? `Осталось бросков: ${rollsLeft}`
         : "Выберите категорию!");
     }
 
-    // Подсвечивает категории с возможными очками
     function highlightCategories() {
       clearHighlights();
       if (!players[currentPlayer] || rollsLeft === 3) return;
@@ -535,7 +570,6 @@
       }
     }
 
-    // Снять подсветку
     function clearHighlights() {
       for (let p = 0; p < numPlayers; p++) {
         for (let r = 0; r < ROWS.length; r++) {
@@ -549,12 +583,10 @@
       }
     }
 
-    // Отобразить сообщение
     function showInfo(text) {
       document.getElementById('info').textContent = text;
     }
 
-    // Расчёт очков для категории
     function calculateScoreForCategory(row, dice) {
       if (!dice || dice.length !== diceCount) return null;
       const counts = [0, 0, 0, 0, 0, 0];
@@ -563,24 +595,24 @@
       const isFirstRoll = (rollsLeft === 2);
 
       switch (row) {
-        // NEW: Школа (1-6)
         case 0: case 1: case 2: case 3: case 4: case 5: {
-          const value = row + 1; // 1-6
-          const cnt = counts[row];
-          if (cnt >= 4) return cnt === 5 ? `+${value * 20}` : `+${value * 10}`;
-          if (cnt === 3) return "—";
-          if (cnt === 2) return `-${value * 10}`;
+          const value = row + 1;
+          const cnt = dice.filter(d => d === value).length;
+
+          if (cnt === 0) return null;
           if (cnt === 1) return `-${value * 20}`;
+          if (cnt === 2) return `-${value * 10}`;
+          if (cnt === 3) return "—";
+          if (cnt === 4) return `+${value * 10}`;
+          if (cnt === 5) return `+${value * 20}`;
           return null;
         }
 
-        // "1 Пара" - сумма двух одинаковых
         case 7: {
           let pairs = counts.map((c, i) => c >= 2 ? (i + 1) * 2 : 0);
           return Math.max(...pairs);
         }
 
-        // "2 Пары" - сумма двух пар
         case 8: {
           let pairs = counts.map((c, i) => c >= 2 ? (i + 1) * 2 : 0)
             .filter(x => x > 0)
@@ -588,7 +620,6 @@
           return pairs.length >= 2 ? pairs[0] + pairs[1] : 0;
         }
 
-        // "Тройка" - сумма трёх одинаковых
         case 9: {
           for (let i = 5; i >= 0; i--) {
             if (counts[i] >= 3) return (i + 1) * 3;
@@ -596,7 +627,6 @@
           return 0;
         }
 
-        // "Квадрат" - сумма четырёх одинаковых
         case 10: {
           for (let i = 5; i >= 0; i--) {
             if (counts[i] >= 4) return (i + 1) * 4;
@@ -604,7 +634,6 @@
           return 0;
         }
 
-        // "Лесница" - 1-5 или 2-6
         case 11: {
           const uniqueSorted = [...new Set(dice)].sort((a, b) => a - b);
           const isSmall = [1, 2, 3, 4, 5].every(v => uniqueSorted.includes(v));
@@ -613,12 +642,10 @@
           return isFirstRoll ? score * 2 : score;
         }
 
-        // "Сумма" - сумма всех костей
         case 12: {
           return isFirstRoll ? sumAll * 2 : sumAll;
         }
 
-        // "Фукс" - 3+2 одинаковых
         case 13: {
           const hasThree = counts.some(c => c === 3);
           const hasTwo = counts.some(c => c === 2);
@@ -626,13 +653,12 @@
           return isFirstRoll ? score * 2 : score;
         }
 
-        // "Покер" - 5 одинаковых ×100
         case 14: {
           const pokerValue = counts.findIndex(c => c === 5) + 1;
           return pokerValue !== -1 ? pokerValue * 100 : 0;
         }
-        case 15: { // "Общий итог"
-          return getTotalForCategoryGroup(playerIndex, 'grandTotal');
+        case 15: {
+          return getTotalForCategoryGroup(currentPlayer, 'grandTotal');
         }
       }
       return null;
