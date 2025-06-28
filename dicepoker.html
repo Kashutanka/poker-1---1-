@@ -11,6 +11,7 @@
       text-align: center;
       margin: 0;
       padding: 20px;
+      user-select: none;
     }
 
     table {
@@ -52,6 +53,15 @@
       background: #e0f7fa;
       background-color: #fff;
       border: 1px solid #4CAF50
+    }
+
+    input[type="text"].cell-input {
+      pointer-events: none;
+      /* Клики проходят сквозь input */
+      background: transparent !important;
+      border: none !important;
+      width: 100%;
+      text-align: center;
     }
 
     .readonly {
@@ -128,6 +138,46 @@
       color: #FF5722;
       font-weight: bold;
     }
+
+    #timerSettings {
+      background: #f8f8f8;
+      padding: 10px;
+      border-radius: 5px;
+      border: 1px solid #ddd;
+    }
+
+    #timerSettings label {
+      display: block;
+      margin: 5px 0;
+      cursor: pointer;
+    }
+
+    #timerSettings input[type="checkbox"] {
+      margin-right: 8px;
+    }
+
+    /* Таймер и сценарии */
+    #timerSettings h3 {
+      margin: 10px 0 5px 0;
+      font-size: 1rem;
+    }
+
+    .thinking-stats {
+      width: 100%;
+      margin-top: 10px;
+      border-collapse: collapse;
+    }
+
+    .thinking-stats th,
+    .thinking-stats td {
+      padding: 8px;
+      border: 1px solid #ddd;
+      text-align: center;
+    }
+
+    .thinking-stats th {
+      background-color: #f2f2f2;
+    }
   </style>
 </head>
 
@@ -138,13 +188,22 @@
   </label>
   <button onclick="startGame()">Начать игру</button>
 
+  <div id="gameContainer"></div>
   <div>Раунд: <span id="currentRound">1</span>/14</div>
   <div id="currentPlayer" style="margin-top: 20px; font-size: 1.2rem; font-weight: bold;"></div>
   <div id="diceContainer"></div>
   <button id="rollBtn" onclick="rollDice()">Бросить кости</button>
   <div>Осталось бросков: <span id="rollsLeft">3</span></div>
   <div id="info"></div>
-  <div id="gameContainer"></div>
+  <div id="timerSettings" style="margin: 15px 0;">
+    <label>Таймер выбора (сек):
+      <input type="number" id="timerDuration" min="5" max="60" value="15">
+    </label>
+
+    <h3>Сценарии после таймера:</h3>
+    <label><input type="checkbox" id="scenarioNextPlayer" checked> Передать ход</label><br>
+    <label><input type="checkbox" id="scenarioLoseRoll"> -1 бросок</label><br>
+  </div>
 
   <script>
     // Категории для таблицы
@@ -179,6 +238,10 @@
     const totalRounds = 14;
     let gameStarted = false;
     let isFinalRoundActive = false;
+    let timer;
+    let timeLeft;
+    let thinkTimers = [];
+    let currentThinkTimer = null;
 
     function startGame() {
       numPlayers = Math.max(1, Math.min(16, parseInt(document.getElementById('numPlayers').value) || 2));
@@ -205,12 +268,27 @@
       }
 
       // Проверяем начало финального раунда
-     
+
 
       // Сбрасываем кубики
       diceValues = Array(diceCount).fill(1);
       diceSelected = Array(diceCount).fill(false);
       rollsLeft = (currentRound === 14) ? 4 : 3;
+
+      players.forEach((player, index) => {
+        const unfilled = player.scores.slice(0, 15).filter(v => v === null);
+        if (unfilled.length === 0) {
+          player.completed = true;
+        }
+      });
+
+      if (players.every(p => p.completed)) {
+        updateGameUI();
+        showInfo("Игра окончена!");
+        showFinalRanking();
+        return;
+      }
+
 
       // Переход к следующему игроку
       currentPlayer = (currentPlayer + 1) % numPlayers;
@@ -219,12 +297,12 @@
       if (currentPlayer === 0 && !isFinalRound) {
         currentRound++;
         document.getElementById('currentRound').textContent = currentRound;
-         if (currentRound  === totalRounds && !isFinalRound) {
-        isFinalRound = true;
-        roundCompletedPlayers = 0;
-        rollsLeft++;
-        showInfo("Финальный раунд! У всех по 4 броска.");
-      }
+        if (currentRound === totalRounds && !isFinalRound) {
+          isFinalRound = true;
+          roundCompletedPlayers = 0;
+          rollsLeft++;
+          showInfo("Финальный раунд! У всех по 4 броска.");
+        }
       }
 
       // Если игрок завершил все категории в финальном раунде
@@ -243,6 +321,7 @@
     }
 
     function onCategoryClick(row, playerIndex) {
+      clearTimer();
       if (isFinalRound && !hasAvailableCategories(currentPlayer)) {
         roundCompletedPlayers++;
       }
@@ -330,6 +409,18 @@
       <button onclick="document.getElementById('rankingModal').remove()" style="margin-top:15px">Закрыть</button>
     </div>
   `;
+
+      if (document.getElementById('scenarioTrackTime').checked) {
+        const timeStats = players.map((p, i) =>
+          `${p.name}: ${timeTracking[i]} раз думал`
+        ).join('<br>');
+
+        document.getElementById('rankingModal').innerHTML += `
+      <h3>Статистика раздумий:</h3>
+      <p>${timeStats}</p>
+    `;
+      }
+
       document.body.appendChild(modal);
     }
 
@@ -340,6 +431,92 @@
       renderDice();
       updateRollsLeft();
     }
+
+    function startTimer() {
+      // Функция старта таймера
+      clearTimer();
+      const duration = parseInt(document.getElementById('timerDuration').value) * 1000;
+      timeLeft = duration;
+
+      timer = setTimeout(() => {
+        executeTimerScenarios();
+      }, duration);
+
+      updateTimerDisplay();
+    }
+
+    function clearTimer() {
+      clearTimeout(timer);
+      document.getElementById('info').style.color = '';
+    }
+
+    function updateTimerDisplay() {
+      const secLeft = Math.ceil(timeLeft / 1000);
+      document.getElementById('info').textContent = `Выберите категорию! (${secLeft} сек)`;
+      document.getElementById('info').style.color = timeLeft < 5000 ? 'red' : '';
+
+      if (timeLeft > 0) {
+        timeLeft -= 1000;
+        setTimeout(updateTimerDisplay, 1000);
+      }
+    }
+
+    // Обработчики сценариев
+    function executeTimerScenarios() {
+    const scenarios = {
+        nextPlayer: document.getElementById('scenarioNextPlayer').checked,
+        loseRoll: document.getElementById('scenarioLoseRoll').checked,
+    };
+
+    // Сценарий: Потеря броска
+    if (scenarios.loseRoll && rollsLeft > 0) {
+        rollsLeft--;
+        updateRollsLeft();
+        showInfo(`Потерян 1 бросок!`);
+    }
+
+    // Сценарий автозаписи + переход
+    if (scenarios.nextPlayer) {
+        let maxScore = 0;
+        let bestCategory = -1;
+        let isSchoolCategory = false;
+
+        // Сначала проверяем обычные категории (не школа)
+        for (let r = 6; r < ROWS.length; r++) { // Начинаем с 7-й категории (после школы)
+            if (!ROWS[r].editable || players[currentPlayer].scores[r] !== null) continue;
+            const score = calculateScoreForCategory(r, diceValues);
+            if (score > maxScore) {
+                maxScore = score;
+                bestCategory = r;
+                isSchoolCategory = false;
+            }
+        }
+
+        // Если не нашли подходящих обычных категорий, проверяем школу
+        if (bestCategory === -1) {
+            for (let r = 0; r < 6; r++) { // Первые 6 категорий - школа
+                if (players[currentPlayer].scores[r] !== null) continue;
+                const score = calculateScoreForCategory(r, diceValues);
+                if (score !== null) { // В школе может быть отрицательный счет
+                    maxScore = score;
+                    bestCategory = r;
+                    isSchoolCategory = true;
+                    break; // Берем первую доступную в школе
+                }
+            }
+        }
+
+        if (bestCategory !== -1) {
+            players[currentPlayer].scores[bestCategory] = maxScore;
+            const prefix = isSchoolCategory ? "Школа: " : "";
+            showInfo(`${prefix}Автовыбор: ${ROWS[bestCategory].label} (${maxScore >= 0 ? '+' : ''}${maxScore})`);
+        }
+        
+        nextPlayerTurn();
+    }
+
+    updateGameUI();
+}
 
     function getTotalForCategoryGroup(playerIndex, group) {
       const player = players[playerIndex];
@@ -432,8 +609,10 @@
 
             const input = document.createElement('input');
             input.type = 'text';
+            input.className = 'cell-input'; // Добавляем класс
             input.readOnly = true;
             input.id = `cell_${r}_${p}`;
+            input.value = formatScore(player.scores[r]);
 
             if (r <= 5) {
               if (player.scores[r] !== null) {
@@ -530,6 +709,7 @@
     }
 
     function rollDice() {
+      startTimer();
       if (rollsLeft <= 0) {
         showInfo("Выберите категорию для записи очков!");
         return;
@@ -553,11 +733,17 @@
 
     function highlightCategories() {
       clearHighlights();
-      if (!players[currentPlayer] || rollsLeft === 3) return;
+      if (!players[currentPlayer]) return;
 
+      // Разрешаем подсветку, если это не первый бросок (кроме финального раунда)
+      const isFirstRollNormalRound = (rollsLeft === 3 && currentRound !== 14);
+      const isFirstRollFinalRound = (rollsLeft === 4 && currentRound === 14);
+
+      if (isFirstRollNormalRound || isFirstRollFinalRound) return;
+
+      // Подсвечиваем категории
       for (let r = 0; r < ROWS.length; r++) {
         if (!ROWS[r].editable || players[currentPlayer].scores[r] !== null) continue;
-
         const score = calculateScoreForCategory(r, diceValues);
         if (score !== null && score !== 0) {
           const bgcell = document.getElementById(`bgcell_${r}_${currentPlayer}`);
