@@ -178,6 +178,65 @@
     .thinking-stats th {
       background-color: #f2f2f2;
     }
+
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 100;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+    }
+
+    .modal-content {
+      background-color: #f8f8f8;
+      margin: 10% auto;
+      padding: 20px;
+      border-radius: 8px;
+      width: 80%;
+      max-width: 500px;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+      text-align: center;
+    }
+
+    .close-modal {
+      color: #aaa;
+      float: right;
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+
+    .close-modal:hover {
+      color: black;
+    }
+
+    #finalResults {
+      margin-top: 20px;
+    }
+
+    #finalResults table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+    }
+
+    #finalResults th,
+    #finalResults td {
+      padding: 8px;
+      border: 1px solid #ddd;
+    }
+
+    #finalResults th {
+      background-color: #8b4513;
+      color: white;
+    }
+
+    #finalResults tr:nth-child(even) {
+      background-color: #f2f2f2;
+    }
   </style>
 </head>
 
@@ -201,8 +260,17 @@
     </label>
 
     <h3>Сценарии после таймера:</h3>
-    <label><input type="checkbox" id="scenarioNextPlayer" checked> Передать ход</label><br>
+    <label><input type="checkbox" id="scenarioNextPlayer"> Передать ход</label><br>
     <label><input type="checkbox" id="scenarioLoseRoll"> -1 бросок</label><br>
+  </div>
+
+  <div id="resultsModal" class="modal">
+    <div class="modal-content">
+
+      <h2>🏆 Итоги игры</h2>
+      <div id="finalResults"></div>
+      <button onclick="closeResultsModal()">Закрыть</button>
+    </div>
   </div>
 
   <script>
@@ -261,25 +329,22 @@
     }
 
     function nextPlayerTurn() {
-      // Проверяем завершение финального раунда
-      if (isFinalRound && roundCompletedPlayers >= numPlayers) {
+      if (players.every(p => ROWS.slice(0, 15).every((_, i) => p.scores[i] !== null))) {
         showFinalResults();
         return;
       }
-
-      // Проверяем начало финального раунда
-
 
       // Сбрасываем кубики
       diceValues = Array(diceCount).fill(1);
       diceSelected = Array(diceCount).fill(false);
       rollsLeft = (currentRound === 14) ? 4 : 3;
 
+      // Переход к следующему игроку
+      currentPlayer = (currentPlayer + 1) % numPlayers;
+
       players.forEach((player, index) => {
         const unfilled = player.scores.slice(0, 15).filter(v => v === null);
-        if (unfilled.length === 0) {
-          player.completed = true;
-        }
+        if (unfilled.length === 0) player.completed = true;
       });
 
       if (players.every(p => p.completed)) {
@@ -288,10 +353,6 @@
         showFinalRanking();
         return;
       }
-
-
-      // Переход к следующему игроку
-      currentPlayer = (currentPlayer + 1) % numPlayers;
 
       // Если завершили круг игроков
       if (currentPlayer === 0 && !isFinalRound) {
@@ -306,9 +367,7 @@
       }
 
       // Если игрок завершил все категории в финальном раунде
-      if (isFinalRound && !hasAvailableCategories(currentPlayer)) {
-        roundCompletedPlayers++;
-      }
+      if (isFinalRound && !hasAvailableCategories(currentPlayer)) roundCompletedPlayers++;
 
       updateGameUI();
       showInfo(`Раунд ${currentRound}/${totalRounds}. Ход: ${players[currentPlayer].name}`);
@@ -322,58 +381,51 @@
 
     function onCategoryClick(row, playerIndex) {
       clearTimer();
-      if (isFinalRound && !hasAvailableCategories(currentPlayer)) {
-        roundCompletedPlayers++;
-      }
 
+      // Проверяем, что ход текущего игрока
       if (playerIndex !== currentPlayer) {
         showInfo(`Сейчас ход ${players[currentPlayer].name}!`);
         return;
       }
 
+      // Проверяем, что категория не заполнена
       if (players[playerIndex].scores[row] !== null) {
         showInfo("Эта категория уже заполнена!");
         return;
       }
 
-      if (row === 15) {
-        const allFilled = ROWS.slice(0, 15)
-          .filter(r => r.editable)
-          .every((_, i) => players[playerIndex].scores[i] !== null);
-
-        if (!allFilled) {
-          showInfo("Сначала заполните все остальные категории!");
-          return;
-        }
-
-        players[playerIndex].scores[15] = getTotalForCategoryGroup(playerIndex, 'grandTotal');
-        players[playerIndex].completed = true;
-        updateGameUI();
-
-        if (players.every(p => p.completed)) {
-          showInfo("Игра окончена!");
-          showFinalRanking(); // <- Добавить сюда
-          document.getElementById("rollButton").disabled = true;
-          return;
-        }
-
+      // Особый случай для итоговых строк
+      if (row === 6 || row === 15) {
+        showInfo("Эта категория заполняется автоматически!");
+        return;
       }
 
+      // Рассчитываем очки
       const score = calculateScoreForCategory(row, diceValues);
       if (score === null) {
         showInfo("Нельзя записать в эту категорию!");
         return;
       }
 
+      // Записываем очки
       players[playerIndex].scores[row] = score;
+
+      // Обновляем итоговые значения
+      getTotalForCategoryGroup(playerIndex, 'schoolTotal');
+      getTotalForCategoryGroup(playerIndex, 'grandTotal');
+
       updateGameUI();
 
-      const remainingCategories = ROWS.slice(0, 15)
-        .filter(r => r.editable)
-        .filter((_, i) => players[playerIndex].scores[i] === null).length;
+      // Проверяем завершение игры после хода
+      if (players.every(p =>
+        ROWS.slice(0, 15).every((_, i) => p.scores[i] !== null)
+      )) {
+        showFinalResults();
+        return;
+      }
 
+      // Передаем ход следующему игроку
       nextPlayerTurn();
-
     }
 
     function showFinalRanking() {
@@ -463,60 +515,100 @@
 
     // Обработчики сценариев
     function executeTimerScenarios() {
-    const scenarios = {
+      const scenarios = {
         nextPlayer: document.getElementById('scenarioNextPlayer').checked,
         loseRoll: document.getElementById('scenarioLoseRoll').checked,
-    };
+      };
 
-    // Сценарий: Потеря броска
-    if (scenarios.loseRoll && rollsLeft > 0) {
+      // Сценарий: Потеря броска
+      if (scenarios.loseRoll && rollsLeft > 1) {
         rollsLeft--;
         updateRollsLeft();
         showInfo(`Потерян 1 бросок!`);
-    }
+        highlightCategories();
+      } else if (scenarios.loseRoll && rollsLeft === 1) {
+        showInfo(`Потерян последний бросок!`);
+        highlightCategories();
+         let maxScore = 0;
+        let bestCategory = -1;
+        let isSchoolCategory = false;
 
-    // Сценарий автозаписи + переход
-    if (scenarios.nextPlayer) {
+        // Сначала проверяем обычные категории (не школа)
+        for (let r = 6; r < ROWS.length; r++) { // Начинаем с 7-й категории (после школы)
+          if (!ROWS[r].editable || players[currentPlayer].scores[r] !== null) continue;
+          const score = calculateScoreForCategory(r, diceValues);
+          if (score > maxScore) {
+            maxScore = score;
+            bestCategory = r;
+            isSchoolCategory = false;
+          }
+        }
+
+        // Если не нашли подходящих обычных категорий, проверяем школу
+        if (bestCategory === -1) {
+          for (let r = 0; r < 6; r++) { // Первые 6 категорий - школа
+            if (players[currentPlayer].scores[r] !== null) continue;
+            const score = calculateScoreForCategory(r, diceValues);
+            if (score !== null) { // В школе может быть отрицательный счет
+              maxScore = score;
+              bestCategory = r;
+              isSchoolCategory = true;
+              break; // Берем первую доступную в школе
+            }
+          }
+        }
+
+        if (bestCategory !== -1) {
+          players[currentPlayer].scores[bestCategory] = maxScore;
+          const prefix = isSchoolCategory ? "Школа: " : "";
+          showInfo(`${prefix}Автовыбор: ${ROWS[bestCategory].label} (${maxScore >= 0 ? '+' : ''}${maxScore})`);
+        }
+
+        nextPlayerTurn();
+        }
+
+      // Сценарий автозаписи + переход
+      if (scenarios.nextPlayer) {
         let maxScore = 0;
         let bestCategory = -1;
         let isSchoolCategory = false;
 
         // Сначала проверяем обычные категории (не школа)
         for (let r = 6; r < ROWS.length; r++) { // Начинаем с 7-й категории (после школы)
-            if (!ROWS[r].editable || players[currentPlayer].scores[r] !== null) continue;
-            const score = calculateScoreForCategory(r, diceValues);
-            if (score > maxScore) {
-                maxScore = score;
-                bestCategory = r;
-                isSchoolCategory = false;
-            }
+          if (!ROWS[r].editable || players[currentPlayer].scores[r] !== null) continue;
+          const score = calculateScoreForCategory(r, diceValues);
+          if (score > maxScore) {
+            maxScore = score;
+            bestCategory = r;
+            isSchoolCategory = false;
+          }
         }
 
         // Если не нашли подходящих обычных категорий, проверяем школу
         if (bestCategory === -1) {
-            for (let r = 0; r < 6; r++) { // Первые 6 категорий - школа
-                if (players[currentPlayer].scores[r] !== null) continue;
-                const score = calculateScoreForCategory(r, diceValues);
-                if (score !== null) { // В школе может быть отрицательный счет
-                    maxScore = score;
-                    bestCategory = r;
-                    isSchoolCategory = true;
-                    break; // Берем первую доступную в школе
-                }
+          for (let r = 0; r < 6; r++) { // Первые 6 категорий - школа
+            if (players[currentPlayer].scores[r] !== null) continue;
+            const score = calculateScoreForCategory(r, diceValues);
+            if (score !== null) { // В школе может быть отрицательный счет
+              maxScore = score;
+              bestCategory = r;
+              isSchoolCategory = true;
+              break; // Берем первую доступную в школе
             }
+          }
         }
 
         if (bestCategory !== -1) {
-            players[currentPlayer].scores[bestCategory] = maxScore;
-            const prefix = isSchoolCategory ? "Школа: " : "";
-            showInfo(`${prefix}Автовыбор: ${ROWS[bestCategory].label} (${maxScore >= 0 ? '+' : ''}${maxScore})`);
+          players[currentPlayer].scores[bestCategory] = maxScore;
+          const prefix = isSchoolCategory ? "Школа: " : "";
+          showInfo(`${prefix}Автовыбор: ${ROWS[bestCategory].label} (${maxScore >= 0 ? '+' : ''}${maxScore})`);
         }
-        
-        nextPlayerTurn();
-    }
 
-    updateGameUI();
-}
+        nextPlayerTurn();
+      }
+
+      updateGameUI();
+    }
 
     function getTotalForCategoryGroup(playerIndex, group) {
       const player = players[playerIndex];
@@ -690,22 +782,50 @@
     }
 
     function showFinalResults() {
-      let result = "<h2>Игра завершена!</h2><p>Итоговые очки:</p><ul>";
-      players.forEach(player => {
-        const total = player.scores[15] || 0;
-        result += `<li>${player.name}: ${total}</li>`;
+      // Отключаем игровые элементы
+      document.getElementById('rollBtn').disabled = true;
+
+      // Считаем финальные очки
+      players.forEach((_, i) => {
+        getTotalForCategoryGroup(i, 'grandTotal');
       });
-      result += "</ul>";
 
-      const winner = players.reduce((prev, current) =>
-        (prev.scores[15] > current.scores[15]) ? prev : current
-      );
-      result += `<h3>Победитель: ${winner.name} с ${winner.scores[15]} очками!</h3>`;
+      // Сортируем игроков по очкам
+      const sortedPlayers = [...players].sort((a, b) => b.scores[15] - a.scores[15]);
 
-      document.getElementById('gameContainer').innerHTML = result;
-      document.getElementById('diceContainer').innerHTML = '';
-      document.getElementById('rollBtn').style.display = 'none';
-      document.getElementById('info').innerHTML = '';
+      // Формируем таблицу результатов
+      let resultsHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Место</th>
+              <th>Игрок</th>
+              <th>Очки</th>
+            </tr>
+          </thead>
+          <tbody>`;
+
+      sortedPlayers.forEach((player, index) => {
+        resultsHTML += `
+          <tr>
+            <td>${index + 1}</td>
+            <td>${player.name}</td>
+            <td>${player.scores[15]}</td>
+          </tr>`;
+      });
+
+      resultsHTML += `</tbody></table>`;
+
+      // Показываем модальное окно
+      document.getElementById('finalResults').innerHTML = resultsHTML;
+      document.getElementById('resultsModal').style.display = "block";
+
+      // Добавляем обработчик закрытия
+      document.querySelector('.close-modal').onclick = closeResultsModal;
+    }
+
+    function closeResultsModal() {
+      document.getElementById('resultsModal').style.display = "none";
     }
 
     function rollDice() {
