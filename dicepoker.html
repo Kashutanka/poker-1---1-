@@ -237,6 +237,139 @@
     #finalResults tr:nth-child(even) {
       background-color: #f2f2f2;
     }
+
+    .dice3d {
+      width: 60px;
+      height: 60px;
+      margin: 5px;
+      display: inline-block;
+      transform-style: preserve-3d;
+      animation: spin 0.6s ease-in-out;
+      position: relative;
+      background: radial-gradient(#fff, #ccc);
+      border-radius: 12px;
+      font-size: 36px;
+      line-height: 60px;
+      font-weight: bold;
+      text-align: center;
+      border: 2px solid #999;
+    }
+
+    .dice3d::after {
+      content: attr(data-value);
+      display: block;
+    }
+
+    .dice3d.selected {
+      border-color: red;
+    }
+
+    @keyframes spin {
+      0% {
+        transform: rotateX(0deg) rotateY(0deg);
+      }
+
+      100% {
+        transform: rotateX(var(--random-rot-x)) rotateY(var(--random-rot-y));
+      }
+    }
+
+    #diceContainer {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      perspective: 1000px;
+      perspective-origin: 50% 50%;
+    }
+
+    .cube {
+      width: 60px;
+      height: 60px;
+      position: relative;
+      transform-style: preserve-3d;
+      transform: rotateX(0deg) rotateY(0deg);
+      transition: transform 1s ease-in-out;
+    }
+
+    .dice {
+      width: 60px;
+      height: 60px;
+      position: relative;
+      transform-style: preserve-3d;
+      margin: 10px;
+      border: 2px solid #333;
+      border-radius: 6px;
+    }
+
+    .cube.selected {
+      outline: 3px solid red;
+      outline-offset: 4px;
+    }
+
+    .diceWrapper.selected .cube3d {
+      box-shadow: 0 0 10px 2px #007bff;
+      border-radius: 8px;
+    }
+
+    .face {
+      position: absolute;
+      width: 60px;
+      height: 60px;
+      background: white;
+      border: 1px solid #888;
+      font-size: 24px;
+      font-weight: bold;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      backface-visibility: hidden;
+    }
+
+    /* Позиции граней */
+    .front {
+      transform: rotateY(0deg) translateZ(30px);
+    }
+
+    .back {
+      transform: rotateY(180deg) translateZ(30px);
+    }
+
+    .right {
+      transform: rotateY(90deg) translateZ(30px);
+    }
+
+    .left {
+      transform: rotateY(-90deg) translateZ(30px);
+    }
+
+    .top {
+      transform: rotateX(90deg) translateZ(30px);
+    }
+
+    .bottom {
+      transform: rotateX(-90deg) translateZ(30px);
+    }
+
+    .dot-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 1fr);
+      width: 100%;
+      height: 100%;
+    }
+
+    .dot-cell {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      background: black;
+      border-radius: 50%;
+    }
   </style>
 </head>
 
@@ -295,21 +428,22 @@
     ];
 
     // Основные переменные
-    let numPlayers = 2;
-    let currentPlayer = 0;
-    let rollsLeft = 3;
-    const diceCount = 5;
-    let diceValues = Array(diceCount).fill(1);
-    let diceSelected = Array(diceCount).fill(false);
-    let players = [];
-    let currentRound = 1;
-    const totalRounds = 14;
-    let gameStarted = false;
-    let isFinalRoundActive = false;
     let timer;
     let timeLeft;
+    let players = [];
+    let rollsLeft = 3;
+    let numPlayers = 2;
+    const diceCount = 5;
     let thinkTimers = [];
+    let currentRound = 1;
+    let currentPlayer = 0;
+    let cubeElements = [];
+    const totalRounds = 14;
+    let gameStarted = false;
     let currentThinkTimer = null;
+    let isFinalRoundActive = false;
+    let diceValues = Array(diceCount).fill(1);
+    let diceSelected = Array(diceCount).fill(false);
 
     function startGame() {
       numPlayers = Math.max(1, Math.min(16, parseInt(document.getElementById('numPlayers').value) || 2));
@@ -529,7 +663,7 @@
       } else if (scenarios.loseRoll && rollsLeft === 1) {
         showInfo(`Потерян последний бросок!`);
         highlightCategories();
-         let maxScore = 0;
+        let maxScore = 0;
         let bestCategory = -1;
         let isSchoolCategory = false;
 
@@ -565,7 +699,7 @@
         }
 
         nextPlayerTurn();
-        }
+      }
 
       // Сценарий автозаписи + переход
       if (scenarios.nextPlayer) {
@@ -756,19 +890,120 @@
     function renderDice() {
       const container = document.getElementById('diceContainer');
       container.innerHTML = '';
+      container.style.perspective = '800px';
+
       for (let i = 0; i < diceCount; i++) {
-        const img = document.createElement('img');
-        img.src = getDiceImage(diceValues[i]);
-        img.alt = diceValues[i];
-        img.title = `Кость ${i + 1}: ${diceValues[i]}`;
-        if (diceSelected[i]) img.classList.add('selected');
-        img.onclick = () => {
-          if (rollsLeft === 3 && diceValues.every(v => v === 1)) return;
+        const cube = document.createElement('div');
+        cube.className = 'dice';
+        cube.style.position = 'relative';
+        cube.style.width = '60px';
+        cube.style.height = '60px';
+        cube.style.transformStyle = 'preserve-3d';
+        cube.style.transition = `transform ${1 + Math.random()}s ease-in-out`;
+        cube.style.margin = '10px';
+        cube.style.display = 'inline-block';
+
+        const faces = [
+          { transform: 'rotateY(0deg) translateZ(30px)', value: 1 },
+          { transform: 'rotateY(180deg) translateZ(30px)', value: 2 },
+          { transform: 'rotateY(90deg) translateZ(30px)', value: 3 },
+          { transform: 'rotateY(-90deg) translateZ(30px)', value: 4 },
+          { transform: 'rotateX(90deg) translateZ(30px)', value: 5 },
+          { transform: 'rotateX(-90deg) translateZ(30px)', value: 6 }
+        ];
+
+        for (let f = 0; f < 6; f++) {
+          const face = document.createElement('div');
+          face.className = 'face';
+          face.style.position = 'absolute';
+          face.style.width = '60px';
+          face.style.height = '60px';
+          face.style.background = '#fff';
+          face.style.border = '2px solid #000';
+          face.style.display = 'flex';
+          face.style.alignItems = 'center';
+          face.style.justifyContent = 'center';
+          face.style.transform = faces[f].transform;
+          face.innerHTML = getDotsHTML(faces[f].value);
+          cube.appendChild(face);
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.style.display = 'inline-block';
+        wrapper.style.padding = '5px';
+        wrapper.style.border = diceSelected[i] ? '2px solid red' : '2px solid transparent';
+        wrapper.style.borderRadius = '8px';
+
+        wrapper.onclick = () => {
+          if (rollsLeft === 3) return;
           diceSelected[i] = !diceSelected[i];
-          img.classList.toggle('selected');
+          wrapper.style.border = diceSelected[i] ? '2px solid red' : '2px solid transparent';
         };
-        container.appendChild(img);
+        
+        wrapper.appendChild(cube);
+        container.appendChild(wrapper);
+
+        // Анимация вращения с элементом неожиданности
+        const value = diceValues[i];
+        const randX = 360 * (2 + Math.floor(Math.random() * 2));
+        const randY = 360 * (2 + Math.floor(Math.random() * 2));
+        const delay = Math.random() * 300;
+        const correction = getRotationForValue(value);
+
+        setTimeout(() => {
+          cube.style.transform = `rotateX(${randX}deg) rotateY(${randY}deg) ${correction}`;
+        }, delay);
       }
+    }
+
+    function getDotsHTML(value) {
+      const dot = '<div class="dot"></div>';
+      const layout = {
+        1: [4],
+        2: [0, 8],
+        3: [0, 4, 8],
+        4: [0, 2, 6, 8],
+        5: [0, 2, 4, 6, 8],
+        6: [0, 2, 3, 5, 6, 8]
+      };
+      const positions = layout[value] || [];
+      let html = '<div class="dot-grid">';
+      for (let i = 0; i < 9; i++) {
+        html += `<div class="dot-cell">${positions.includes(i) ? dot : ''}</div>`;
+      }
+      html += '</div>';
+      return html;
+    }
+
+    function getRotationForValue(value) {
+      switch (value) {
+        case 1: return { x: 0, y: 0 };
+        case 2: return { x: 180, y: 0 };
+        case 3: return { x: 0, y: 90 };
+        case 4: return { x: 0, y: -90 };
+        case 5: return { x: -90, y: 0 };
+        case 6: return { x: 90, y: 0 };
+        default: return { x: 0, y: 0 };
+      }
+    }
+
+    function animateDiceRotation() {
+      const cubes = document.querySelectorAll('.dice');
+
+      cubes.forEach((cube, i) => {
+        if (diceSelected[i]) return; // если кость зафиксирована, не крутим
+
+        const value = diceValues[i];
+        const randX = 360 * (2 + Math.floor(Math.random() * 2));
+        const randY = 360 * (2 + Math.floor(Math.random() * 2));
+        const correction = getRotationForValue(value);
+        const delay = Math.random() * 300;
+
+        setTimeout(() => {
+          cube.style.transition = `transform ${1 + Math.random()}s ease-in-out`;
+          cube.style.transform = `rotateX(${randX + correction.x}deg) rotateY(${randY + correction.y}deg)`;
+        }, delay);
+      });
     }
 
     function getDiceImage(value) {
@@ -841,10 +1076,29 @@
         }
       }
 
+      for (let i = 0; i < diceCount; i++) {
+        if (!diceSelected[i]) {
+          const value = diceValues[i];
+          const rotation = getRotationForValue(value);
+          const randX = 720 + Math.floor(Math.random() * 360);
+          const randY = 720 + Math.floor(Math.random() * 360);
+          const cube = cubeElements[i];
+          if (cube) {
+            const totalX = randX + rotation.x;
+            const totalY = randY + rotation.y;
+            const duration = (0.8 + Math.random() * 0.6).toFixed(2); // от 0.8 до 1.4 секунд
+            cube.style.transition = `transform ${duration}s ease-in-out`;
+            cube.style.transform = `rotateX(${totalX}deg) rotateY(${totalY}deg)`;
+          }
+        }
+      }
+
+
       rollsLeft--;
-      updateRollsLeft();
       renderDice();
+      updateRollsLeft();
       highlightCategories();
+      animateDiceRotation(); // запускаем вращение (только после кнопки!)
 
       showInfo(rollsLeft > 0
         ? `Осталось бросков: ${rollsLeft}`
